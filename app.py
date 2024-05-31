@@ -11,6 +11,7 @@ from sqlalchemy import not_
 from werkzeug.security import generate_password_hash, check_password_hash 
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from flask_mail import Mail, Message
+from sqlalchemy import or_
 
 
 
@@ -126,6 +127,7 @@ class newsletter(db.Model):
 
 class blood_donate(db.Model):
         sno = db.Column(db.Integer, primary_key=True)
+        userId = db.Column(db.Integer, nullable=False)
         first_name = db.Column(db.String(50), nullable=False)
         last_name = db.Column(db.String(50), nullable=False)
         blood = db.Column(db.String(100),nullable=False)
@@ -144,6 +146,7 @@ class blood_donate(db.Model):
 
 class blood_request(db.Model): 
     sno = db.Column(db.Integer, primary_key=True)
+    userId = db.Column(db.Integer, nullable=False)
     first_name = db.Column(db.String(50), nullable=False)
     last_name = db.Column(db.String(50), nullable=False)
     blood = db.Column(db.String(100),nullable=False)
@@ -250,24 +253,28 @@ def register():
 
 
 
+from flask import render_template
+
 @app.route("/login", methods=['GET','POST'])
 def login():
     if request.method == "POST":
-        username = request.form['username']
+        username_or_email = request.form['username']
         plain_password = request.form['password']
 
-        # checking if username already exists
-        usr = user.query.filter_by(username=username).first()
+        # checking if username or email exists
+        usr = user.query.filter(or_(user.username == username_or_email, user.email == username_or_email)).first()
+        
         if usr:
-            hashed_password=usr.password
+            hashed_password = usr.password
             if check_password_hash(hashed_password, plain_password):
-              login_user(usr)  # login that user
-              return redirect("/")
+                login_user(usr)  # login that user
+                return redirect("/")
             else:
-              return render_template("login.html", message="Password Wrong!!")
+                return render_template("login.html", message="Password Wrong!!")
         else: 
-              return render_template("login.html", message="No such user exists !!")    
+            return render_template("login.html", message="No such user exists !!")    
     return render_template("login.html")
+
 
 
 #profile section ##
@@ -365,7 +372,7 @@ def news_letter():
 def request_b():
     user= load_user(current_user.get_id())
     if user:
-        req = blood_request.query.filter_by( first_name=user.first_name,email=user.email ).first()
+        req = blood_request.query.filter_by(userId = user.sno ).first()
         if req:
             flag = req.flag
             det=req.address_details
@@ -391,7 +398,7 @@ def blood_request1():
                 number = request.form['number']
                 location = request.form['location']
                 address_details=0
-                req = blood_request(first_name=first_name,last_name=last_name,blood=blood,
+                req = blood_request(userId = user.sno,first_name=first_name,last_name=last_name,blood=blood,
                         email=email,number=number,location=location,address_details=address_details)
                 db.session.add(req)  # adding user if not exists
                 db.session.commit()
@@ -407,7 +414,7 @@ def blood_request1():
 def donate():
    user= load_user(current_user.get_id())
    if user:
-        req = blood_donate.query.filter_by( first_name=user.first_name,email=user.email ).first()
+        req = blood_donate.query.filter_by( userId = user.sno ).first()
         if req:
             flag = req.flag
             det=req.address_details
@@ -432,15 +439,14 @@ def donate_blood():
                 number = request.form['number']
                 location = request.form['location']
                 address_details=0
-
-                donate = blood_donate(first_name=first_name,last_name=last_name,blood=blood,dob=dob,
+                donate = blood_donate(userId=user.sno,first_name=first_name,last_name=last_name,blood=blood,dob=dob,
                         email=email,number=number,location=location,address_details=address_details)
                 db.session.add(donate)  # adding user if not exists
                 db.session.commit()
                 req = blood_donate.query.filter_by( first_name=first_name,email=email).first()
                 if req:
                  return redirect("/donate")
-        
+   return render_template("donate.html",exist=False,usr=user)    
  
 @login_required
 @app.route('/notification')
@@ -448,7 +454,7 @@ def notify():
     return render_template("notification.html",users=blood_donate)
   
 
-@app.route('/adminl')
+@app.route('/sub_admin')
 def admin_login():
       # Fetch all blood donation records from the database
     return render_template("admin.html")
@@ -505,11 +511,12 @@ def details_send(donar_id):
          receiver_database= blood_request.query.get(select_request_1)
          donar_database.address_details=select_request_1
          receiver_database.address_details=donar_id
-         donar_database.flag=2
-         receiver_database.flag=2
-         db.session.commit()
-       print("Donor ID:", donar_id)
-       print("Selected Request:", select_request_1)
+         if donar_database.userId != receiver_database.userId:
+            donar_database.flag=2
+            receiver_database.flag=2
+            db.session.commit()  
+         else:
+            return "donar and receiver are same person"    
     return redirect('/display_donar')
        
     
@@ -544,9 +551,12 @@ def details_send1(request_id):
          receiver_database= blood_request.query.get(request_id)
          donar_database.address_details=request_id
          receiver_database.address_details=select_request_1
-         donar_database.flag=2
-         receiver_database.flag=2
-         db.session.commit()
+         if donar_database.userId != receiver_database.userId:
+            donar_database.flag=2
+            receiver_database.flag=2
+            db.session.commit()
+         else:
+            return "donar and receiver are same person"
     return redirect('/display_request')
 
 ## Reset password start ##
